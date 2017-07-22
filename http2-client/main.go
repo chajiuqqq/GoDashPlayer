@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"sync"
 
-	"bola/BolaClient/utils"
+	"github.com/sevketarisu/GoDashPlayer/utils"
 )
 
 func main() {

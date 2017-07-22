@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bola/BolaClient/utils"
 	"bytes"
 	"crypto/tls"
 	"flag"
 	"github.com/lucas-clemente/quic-go/h2quic"
+	"github.com/sevketarisu/GoDashPlayer/utils"
 	"io"
 	"net/http"
 	"strconv"

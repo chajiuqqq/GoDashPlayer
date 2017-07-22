@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"bola/BolaClient/utils"
+	"github.com/sevketarisu/GoDashPlayer/utils"
 )
 
 func main() {

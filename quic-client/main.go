@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"bola/BolaClient/utils"
 	"github.com/lucas-clemente/quic-go/h2quic"
+	"github.com/sevketarisu/GoDashPlayer/utils"
 )
 
 //var b *bytes.Buffer

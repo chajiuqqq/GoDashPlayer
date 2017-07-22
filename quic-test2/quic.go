@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bola/BolaClient/utils"
+	"github.com/sevketarisu/GoDashPlayer/utils"
 	//"bytes"
 	"crypto/tls"
 	"flag"

@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bola/BolaClient/config"
 	"bytes"
 	"crypto/tls"
 	"flag"
 	"fmt"
 	"github.com/lucas-clemente/quic-go/h2quic"
+	"github.com/sevketarisu/GoDashPlayer/config"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"io/ioutil"

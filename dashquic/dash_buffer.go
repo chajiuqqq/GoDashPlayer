@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bola/BolaClient/config"
+	"github.com/sevketarisu/GoDashPlayer/config"
 	//"bola/BolaClient/utils"
 	"errors"
 	"fmt"
