@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
 	"flag"
@@ -8,12 +9,14 @@ import (
 	"github.com/lucas-clemente/quic-go/h2quic"
 	"github.com/sevketarisu/GoDashPlayer/config"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/http2"
 	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -29,7 +32,10 @@ var download bool
 var playbackType string
 var mpdFullUrl string
 var quic bool
+var h2 bool
 var LOCAL_TEMP_DIR string
+var jumpSecondsArgs []string
+var proto bool
 
 type DashPlayback struct {
 	minBufferTime    float64                  //as seconds
@@ -57,9 +63,11 @@ func main() {
 
 	// get verbose flag from program arguments
 	verbose := flag.Bool("v", false, "verbose")
+	jump := flag.Bool("j", false, "jump")
 
 	//get other program arguments
 	parse_arguments()
+	print_arguments()
 
 	//set log level
 	if *verbose {
@@ -67,17 +75,30 @@ func main() {
 	} else {
 		log.SetLevel(log.InfoLevel)
 	}
+	if *jump {
+		jumpSecondsArgs = flag.Args()
+	}
+
+	log.WithFields(log.Fields{
+		"jumpSecondsArgs": jumpSecondsArgs,
+	}).Info("DASH_CLIENT:")
 
 	// download mpd file and return a http client
 	log.WithFields(log.Fields{
 		"mpdFile": mpdFullUrl,
-	}).Info("Downloading MPD file")
+	}).Info("DASH_CLIENT: Downloading MPD file")
 
-	mpdFile, hclient := get_mpd(mpdFullUrl, quic)
+	mpdFile, hclient, cmdWriter, scanner, localTempFolder := get_mpd(mpdFullUrl)
+
+	/*log.WithFields(log.Fields{
+		"hclient":   hclient,
+		"cmdWriter": cmdWriter,
+		"scanner":   scanner,
+	}).Info("DASH_CLIENT: Clients got")*/
 
 	log.WithFields(log.Fields{
 		"mpdFile": mpdFile,
-	}).Info("Downloaded MPD file")
+	}).Info("DASH_CLIENT: Downloaded MPD file")
 
 	//get domain name from mpd full url
 	domainName := get_domain_name(mpdFullUrl)
@@ -87,32 +108,37 @@ func main() {
 
 	log.WithFields(log.Fields{
 		"mpdFile": mpdFile,
-	}).Info("Reading MPD file")
+	}).Info("DASH_CLIENT: Reading MPD file")
 
 	//read mpd file and get videoSegmentDuration
 	videoSegmentDuration := read_mpd(mpdFile, dpObject)
 
 	log.WithFields(log.Fields{
 		"representation count": len(dpObject.video),
-	}).Info("MPD file DASH media video")
+	}).Info("DASH_CLIENT: MPD file DASH media video")
 
 	//if -l is provided in program arguments only list presentations and exit immediately
 
 	if list {
-		log.Info("Printing representations")
+		log.Info("DASH_CLIENT: Printing representations")
 		print_representations(dpObject)
-		log.Info("Printed representations")
+		log.Info("DASH_CLIENT: Printed representations")
 	}
 
-	//start playback with BASIC algorithm
-	log.Info("Starting BASIC playback")
-	start_playback_smart(hclient, dpObject, domainName, "BASIC", download, videoSegmentDuration)
+	//start playback with BASIC algorith
+	log.Info("DASH_CLIENT: Starting BASIC playback")
+	start_playback_smart(hclient, cmdWriter, scanner, dpObject, domainName, "BASIC", download, videoSegmentDuration, jumpSecondsArgs, localTempFolder)
 
+	if proto {
+		io.WriteString(*cmdWriter, "exit\n")
+	}
 	// dash_client is finishing
 	fmt.Println("###dash_client.main() FINISHED###")
+
 }
 
-func start_playback_smart(hclient *http.Client, dpObject *DashPlayback, domainName string, playbackType string, download bool, videoSegmentDuration float64) {
+func start_playback_smart(hclient *http.Client, cmdWriter *io.WriteCloser, scanner *bufio.Scanner, dpObject *DashPlayback, domainName string,
+	playbackType string, download bool, videoSegmentDuration float64, jumpSeconds []string, localTempFolder string) {
 
 	// create a new DashPlayer object and hold pointer
 	dp := &DashPlayer{}
@@ -124,11 +150,11 @@ func start_playback_smart(hclient *http.Client, dpObject *DashPlayback, domainNa
 	dp.start()
 
 	//temp folder name to saving downloded segment files
-	var fileIdentifier string = id_generator()
+	//	var fileIdentifier string = id_generator()
 
 	log.WithFields(log.Fields{
-		"fileIdentifier": fileIdentifier,
-	}).Info("The segments are stored in folder")
+		"localTempFolder": localTempFolder,
+	}).Info("DASH_CLIENT: The segments are stored in folder")
 
 	//presentations list  format:  map[segmentNumber]map[bitrate]segment_url
 	var dpList = make(map[int]map[float64]string)
@@ -183,13 +209,14 @@ func start_playback_smart(hclient *http.Client, dpObject *DashPlayback, domainNa
 	var segmentInfo SegmentInfo
 	var currentBitrate = bitrates[0] // start with smallest bitrate in bitrates list
 	var previousBitrate float64 = -1 // there's no previousBitrate before not playing any segment
+	var jumpCounter int = 0
 
 	for segmentNumber := dpObject.video[currentBitrate].start; segmentNumber <= len(dpList); segmentNumber++ { //segment=map[float64]string   segment[bitrate]=mediaUrl
 
 		log.WithFields(log.Fields{
 			"segmentNumber": segmentNumber,
 			"playbackType":  playbackType,
-		}).Info("Processing the segment")
+		}).Info("DASH_CLIENT: Processing the segment")
 
 		//if is it first segmnet set previousBitrate = currentBitrate
 		if previousBitrate != -1 {
@@ -205,7 +232,7 @@ func start_playback_smart(hclient *http.Client, dpObject *DashPlayback, domainNa
 			if segmentNumber > dp.SegmentLimit {
 				log.WithFields(log.Fields{
 					"SegmentLimit": dp.SegmentLimit,
-				}).Info("Segment limit reached. Downloading segments will stop... ")
+				}).Info("DASH_CLIENT: Segment limit reached. Downloading segments will stop... ")
 				break
 			}
 		}
@@ -216,20 +243,23 @@ func start_playback_smart(hclient *http.Client, dpObject *DashPlayback, domainNa
 		} else {
 			if playbackType == "BASIC" {
 				currentBitrate, averageDwnTime = basic_dash2(segmentNumber, bitrates, averageDwnTime, recentDownloadSizes, previousSegmentTimes, currentBitrate)
-				if dp.Buffer.Len() > config.BASIC_THRESHOLD {
-					delay = float64(dp.Buffer.Len() - config.BASIC_THRESHOLD)
+				if dp.Buffer.len() > config.BASIC_THRESHOLD {
+					delay = float64(dp.Buffer.len() - config.BASIC_THRESHOLD)
 				}
 				log.WithFields(log.Fields{
 					"Next Bitrate":        FloatToString(currentBitrate),
 					"Next Segment Number": segmentNumber,
-				}).Info("Basic-DASH: Selected bitrate for the next segment")
+				}).Info("DASH_CLIENT: Basic-DASH: Selected bitrate for the next segment")
 
 			} else {
 				log.WithFields(log.Fields{
 					"playbackType": playbackType,
-				}).Error("Unknown playback type ")
+				}).Error("DASH_CLIENT: Unknown playback type ")
 			}
 		}
+
+		//segmnet url to download
+		var segmentUrl string = domainName + "/" + dpList[segmentNumber][currentBitrate]
 
 		// if delay occurred wait for a while before downloading next segment
 		if delay > 0 {
@@ -237,34 +267,34 @@ func start_playback_smart(hclient *http.Client, dpObject *DashPlayback, domainNa
 			log.WithFields(log.Fields{
 				"delay":                  delay,
 				"delay*segment_duration": delay * segmentDuration,
-			}).Info("SLEEPING...")
+			}).Info("DASH_CLIENT: SLEEPING...")
 			for GetNow()-delayStart < (delay * segmentDuration) {
 				time.Sleep(1 * time.Second)
 			}
-			log.Info("SLEPT")
+			log.Info("DASH_CLIENT: SLEPT")
 			delay = 0
 		}
-
-		//segmnet url to download
-		var segmentUrl string = domainName + "/" + dpList[segmentNumber][currentBitrate]
 
 		//download startTime
 		var startTime float64 = GetNow()
 
 		log.WithFields(log.Fields{
 			"segmentUrl": segmentUrl,
-		}).Info("Segment URL")
+		}).Info("DASH_CLIENT: Segment URL")
 
 		//download segment file and get its size and name
-		segmentSize, segmentFileName := download_segment(hclient, segmentUrl, fileIdentifier)
+		segmentSize, segmentFileName := download_segment(hclient, cmdWriter, scanner, segmentUrl, localTempFolder)
 
 		log.WithFields(log.Fields{
 			"segmentFileName": segmentFileName,
 			"segmentSize":     FloatToString(segmentSize),
-		}).Info("Downloaded segment")
+		}).Info("DASH_CLIENT: Downloaded segment")
 
 		//calculate segmentDownloadTime
 		segmentDownloadTime = GetNow() - startTime
+		if segmentDownloadTime < 0.0 {
+			segmentDownloadTime = 0.0
+		}
 
 		//add to previousSegmentTimes list and recentDownloadSizes size
 		previousSegmentTimes = append(previousSegmentTimes, segmentDownloadTime)
@@ -277,7 +307,7 @@ func start_playback_smart(hclient *http.Client, dpObject *DashPlayback, domainNa
 			"totalDownloaded": FloatToString(totalDownloaded),
 			"segmentSize":     FloatToString(segmentSize),
 			"segmentNumber":   segmentNumber,
-		}).Info("The total downloaded, segment_size, segment_number")
+		}).Info("DASH_CLIENT: The total downloaded, segment_size, segment_number")
 
 		//initialize segment info before writing it to buffer
 		segmentInfo = make(map[string]string)
@@ -297,7 +327,7 @@ func start_playback_smart(hclient *http.Client, dpObject *DashPlayback, domainNa
 			"segmentSize":         FloatToString(segmentSize),
 			"segmentNumber":       segmentNumber,
 			"segmentDownloadTime": FloatToString(segmentDownloadTime),
-		}).Info("DOWNLOADED:")
+		}).Info("DASH_CLIENT: DOWNLOADED:")
 
 		//determine up_shift or down_shift
 		if previousBitrate == -1 { //None
@@ -318,50 +348,118 @@ func start_playback_smart(hclient *http.Client, dpObject *DashPlayback, domainNa
 				"dp.MaxBufferSize": dp.MaxBufferSize,
 				"dp.BufferLength":  dp.BufferLength,
 			}).Info("Player Buffer is full, waiting for 0.5 sec")*/
-
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
+
+		// seek control
+
+		log.WithFields(log.Fields{
+			"jumpCounter":          jumpCounter,
+			"len(jumpSecondsArgs)": len(jumpSecondsArgs),
+		}).Info("DASH_JUMP: Jump control")
+
+		if jumpCounter < len(jumpSecondsArgs) {
+			j := strings.Split(jumpSecondsArgs[jumpCounter], ",")
+			jumpAtSecond, err := strconv.ParseFloat(j[0], 64)
+			jumpToSecond, err := strconv.ParseFloat(j[1], 64)
+			//	log.Info("DASH_CLIENT: jumpToSecond:", jumpToSecond)
+			//	log.Info("DASH_CLIENT: dp.PlaybackTimer.time:", dp.PlaybackTimer.time())
+			if err != nil {
+				panic(err)
+			}
+			if dp.PlaybackTimer.time() == jumpAtSecond {
+				log.WithFields(log.Fields{
+					"dp.PlaybackTimer.time()": dp.PlaybackTimer.time(),
+					"jumpAtSecond":            jumpAtSecond,
+					"jumpToSecond":            jumpToSecond,
+					"BufferLength":            dp.BufferLength,
+					"dp.Buffer.Len()":         dp.Buffer.len(),
+					"segmentNumber":           segmentNumber,
+					"jumpCounter":             jumpCounter,
+				}).Info("DASH_JUMP: Clearing Buffer:")
+
+				dp.clearBuffer()
+				jumpCounter++
+				segmentNumber = int(jumpToSecond / 4)
+
+				log.WithFields(log.Fields{
+					"dp.PlaybackTimer.time()": dp.PlaybackTimer.time(),
+					"jumpAtSecond":            jumpAtSecond,
+					"jumpToSecond":            jumpToSecond,
+					"BufferLength":            dp.BufferLength,
+					"dp.Buffer.Len()":         dp.Buffer.len(),
+					"segmentNumber":           segmentNumber,
+					"jumpCounter":             jumpCounter,
+				}).Info("DASH_JUMP: Jumped To Segment:")
+
+			}
+		}
+		//	log.Info("DASH_CLIENT: jumpCounter:", jumpCounter)
 
 	} // main for loop for downloading segments
 
 	//after downloading all segments wait for player to stop
 	for !(dp.PlaybackState == "STOP" || dp.PlaybackState == "END") { //while player is  not stopped
 		time.Sleep(1 * time.Second)
-		log.Info("Client is waiting for player stop, current player state:", dp.PlaybackState)
+		log.Info("DASH_CLIENT: Client is waiting for player stop, current player state:", dp.PlaybackState)
 	}
 } //end of start_playback_smart
 
 /*
 download_segment: downloads and saves requested segment file and returns it's size and saved local file name
 */
-func download_segment(hclient *http.Client, segmentUrl string, dashFolder string) (float64, string) {
-
-	response, err := hclient.Get(segmentUrl)
-	if err != nil {
-		panic(err)
-	}
-	defer response.Body.Close()
+func download_segment(hclient *http.Client, cmdWriter *io.WriteCloser, scanner *bufio.Scanner, segmentUrl string, dashFolder string) (float64, string) {
 
 	splitedBySlash := strings.SplitAfterN(segmentUrl, "/", strings.Count(segmentUrl, "/")+1)
 	segmentLocalFileName := dashFolder + splitedBySlash[strings.Count(segmentUrl, "/")]
-	// Create directory if not exits
-	if _, err := os.Stat(dashFolder); os.IsNotExist(err) {
-		os.Mkdir(dashFolder, os.ModePerm)
+
+	if !proto {
+
+		response, err := hclient.Get(segmentUrl)
+		if err != nil {
+			panic(err)
+		}
+		defer response.Body.Close()
+
+		// Create directory if not exits
+		if _, err := os.Stat(dashFolder); os.IsNotExist(err) {
+			os.Mkdir(dashFolder, os.ModePerm)
+		}
+
+		//open a file for writing
+		file, err := os.Create(segmentLocalFileName)
+		if err != nil {
+			panic(err)
+		}
+		// Use io.Copy to just dump the response body to the file. This supports huge files
+		_, err = io.Copy(file, response.Body)
+		if err != nil {
+			panic(err)
+		}
+		file.Close()
+		return float64(response.ContentLength), segmentLocalFileName
+	} else {
+
+		done := make(chan bool)
+
+		var fileSize float64
+
+		io.WriteString(*cmdWriter, segmentUrl+"\n")
+		go func() {
+			fileSize = download_with_console(done, segmentUrl, scanner)
+		}()
+		//	download_with_console(segmentUrl, scanner)
+		//fmt.Println("waiting for download... ", segmentUrl)
+		//wait for dowload finish
+		// Block until we receive a notification from the
+		// worker on the channel.
+
+		<-done
+
+		return fileSize, segmentLocalFileName
+
 	}
 
-	//open a file for writing
-	file, err := os.Create(segmentLocalFileName)
-	if err != nil {
-		panic(err)
-	}
-	// Use io.Copy to just dump the response body to the file. This supports huge files
-	_, err = io.Copy(file, response.Body)
-	if err != nil {
-		panic(err)
-	}
-	file.Close()
-
-	return float64(response.ContentLength), segmentLocalFileName
 }
 
 func basic_dash2(segmentNumber int, bitrates []float64, averageDwnTime float64,
@@ -413,7 +511,7 @@ func basic_dash2(segmentNumber int, bitrates []float64, averageDwnTime float64,
 	log.WithFields(log.Fields{
 		"downloadRate": FloatToString(downloadRate),
 		"nextRate":     FloatToString(nextRate),
-	}).Info("Basic Adaptation")
+	}).Info("DASH_CLIENT: Basic Adaptation")
 
 	return nextRate, updatedDwnTime
 }
@@ -545,7 +643,7 @@ func print_representations(dpObject *DashPlayback) {
 	for k, m := range dpObject.video {
 
 		log.WithFields(log.Fields{
-			"key":              k,
+			"key":              FloatToString(k),
 			"playbackDuration": dpObject.playbackDuration,
 			"baseUrl":          m.baseUrl,
 			"initialization":   m.initialization,
@@ -553,54 +651,139 @@ func print_representations(dpObject *DashPlayback) {
 			"segmentDuration":  m.segmentDuration,
 			"start":            m.start,
 			"timeScale":        m.timeScale,
-		}).Info("Representations")
+		}).Info("DASH_CLIENT: Representations")
 	}
 	os.Exit(0)
 }
 
 /*
-get_mpd: downloads and saves mpd file and returns http or quic client pointer
+get_mpd: downloads and saves mpd file and returns quic or http2 or http client pointer
 */
-func get_mpd(mpdFullUrl string, quic bool) (string, *http.Client) {
+func get_mpd(mpdFullUrl string) (string, *http.Client, *io.WriteCloser, *bufio.Scanner, string) {
 
 	var mpdLocalFileName string
 	var hclient *http.Client
+	var adrCmdWriter *io.WriteCloser
+	//	var cmdWriter *io.WriteCloser
+	var scanner *bufio.Scanner
+	var localTempFolder string
 
-	if quic {
+	localTempFolder = get_random_folder_path()
+
+	splitedBySlash := strings.SplitAfterN(mpdFullUrl, "/", strings.Count(mpdFullUrl, "/")+1)
+	mpdLocalFileName = localTempFolder + splitedBySlash[strings.Count(mpdFullUrl, "/")]
+
+	_ = os.Mkdir(localTempFolder, os.FileMode(0777))
+
+	if quic { //use QUIC
 		hclient = &http.Client{
 			Transport: &h2quic.RoundTripper{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 		}
-	} else {
+	} else if h2 { //use HTTP2
+		tr := &http2.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		hclient = &http.Client{Transport: tr}
+	} else if proto { //use PROTO
+
+	} else { //use HTTP1.1
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 		hclient = &http.Client{Transport: tr}
 	}
 
-	response, err := hclient.Get(mpdFullUrl)
-	if err != nil {
-		panic(err)
+	if !proto {
+
+		response, err := hclient.Get(mpdFullUrl)
+		if err != nil {
+			panic(err)
+		}
+		defer response.Body.Close()
+
+		//utils.Infof("Got response for %s: %#v", mpdFullUrl, response)
+		body := &bytes.Buffer{}
+		_, err = io.Copy(body, response.Body)
+		if err != nil {
+			panic(err)
+		}
+
+		//utils.Infof("Writing mpd file: %s", mpdLocalFileName)
+		err = ioutil.WriteFile(mpdLocalFileName, body.Bytes(), 0644)
+		//	utils.Infof("Saved mpd file: %s", mpdLocalFileName)
+
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		cmdName := "/home/sevket/proto-quic/src/out/Default/quic_client"
+		cmdArgs := []string{"--host=ec2-13-56-87-190.us-west-1.compute.amazonaws.com",
+			"--port=53",
+			"--v=0",
+			"--disable-certificate-verification",
+			"--folder=" + get_random_folder_path(),
+			"x"}
+
+		log.WithFields(log.Fields{
+			"cmdArgs": cmdArgs,
+		}).Info("DASH_CLIENT: cmdArgs")
+
+		cmd := exec.Command(cmdName, cmdArgs...)
+		cmdReader, err1 := cmd.StdoutPipe()
+		if err1 != nil {
+			fmt.Fprintln(os.Stderr, "Error creating StdoutPipe for Cmd", err1)
+			os.Exit(1)
+		}
+
+		cmdWriter, err2 := cmd.StdinPipe()
+		adrCmdWriter = &cmdWriter
+		if err2 != nil {
+			fmt.Fprintln(os.Stderr, "Error creating StdinPipe for Cmd", err2)
+			os.Exit(1)
+		}
+		scanner = bufio.NewScanner(cmdReader)
+		err1 = cmd.Start()
+		if err1 != nil {
+			fmt.Fprintln(os.Stderr, "Error starting Cmd", err1)
+			os.Exit(1)
+		}
+
+		done := make(chan bool)
+		io.WriteString(cmdWriter, mpdFullUrl+"\n")
+		go download_with_console(done, mpdFullUrl, scanner)
+		//	download_with_console(mpdFullUrl, scanner)
+		//	fmt.Println("waiting for download... ", mpdFullUrl)
+		//wait for dowload finish
+		//Block until we receive a notification from the worker on the channel.
+		<-done
+
 	}
-	defer response.Body.Close()
+	return mpdLocalFileName, hclient, adrCmdWriter, scanner, localTempFolder
+}
 
-	//utils.Infof("Got response for %s: %#v", mpdFullUrl, response)
-	body := &bytes.Buffer{}
-	_, err = io.Copy(body, response.Body)
-	if err != nil {
-		panic(err)
+func download_with_console(done chan bool, segmentUrl string, scanner *bufio.Scanner) float64 {
+	//func download_with_console(segmentUrl string, scanner *bufio.Scanner) {
+
+	var fileSize float64
+
+	//fmt.Println("working..for url: ", segmentUrl)
+	for scanner.Scan() {
+		//fmt.Printf("console out | %s\n", scanner.Text())
+
+		if strings.HasPrefix(scanner.Text(), "file_size") {
+
+			s := strings.Split(scanner.Text(), ":")
+			fileSize, _ = strconv.ParseFloat(s[1], 64)
+
+		} else if strings.HasPrefix(scanner.Text(), "Request succeeded (200).") {
+			break
+		}
 	}
-
-	splitedBySlash := strings.SplitAfterN(mpdFullUrl, "/", strings.Count(mpdFullUrl, "/")+1)
-	mpdLocalFileName = LOCAL_TEMP_DIR + splitedBySlash[strings.Count(mpdFullUrl, "/")]
-
-	//utils.Infof("Writing mpd file: %s", mpdLocalFileName)
-	err = ioutil.WriteFile(mpdLocalFileName, body.Bytes(), 0644)
-	//	utils.Infof("Saved mpd file: %s", mpdLocalFileName)
-
-	if err != nil {
-		panic(err)
-	}
-	return mpdLocalFileName, hclient
+	//fmt.Println(" done for url: ", segmentUrl)
+	// Send a value to notify that we're done.
+	done <- true
+	//fmt.Println("fileSize", fileSize)
+	return fileSize
 }
 
 /*
@@ -611,16 +794,34 @@ func parse_arguments() {
 	flag.BoolVar(&list, "l", false, "List all the representations")
 	flag.BoolVar(&download, "d", false, "Keep the video files after playback")
 	flag.BoolVar(&quic, "quic", false, "Enable quic")
-	flag.StringVar(&playbackType, "p", "DEFAULT_PLAYBACK", "Playback type (basic, sara, netflix, or all)")
+	flag.BoolVar(&proto, "proto", false, "Enable proto-quic client console for downloading segments")
+	flag.BoolVar(&h2, "h2", false, "Enable http2")
+	flag.StringVar(&playbackType, "p", "basic", "Playback type (basic, sara, netflix, or all)")
 	flag.StringVar(&mpdFullUrl, "m", "https://caddy.quic/BigBuckBunny_4s.mpd", "Url to the MPD File")
-	flag.StringVar(&LOCAL_TEMP_DIR, "f", "tmp", "Temp folder for downloading segments")
+	flag.StringVar(&LOCAL_TEMP_DIR, "f", "/home/sevket/go/src/github.com/sevketarisu/GoDashPlayer/dashquic/_tmp/DOWNLOADED/", "Temp folder for downloading segments")
 	flag.Parse()
 }
 
 /*
-id_generator: returns random folder
+print_arguments: prints  command line parameters
 */
-func id_generator() string {
+func print_arguments() {
+	log.WithFields(log.Fields{
+		"segmentLimitParameter": segmentLimitParameter,
+		"list":                  list,
+		"download":              download,
+		"quic":                  quic,
+		"http2":                 h2,
+		"playbackType":          playbackType,
+		"mpdFullUrl":            mpdFullUrl,
+		"LOCAL_TEMP_DIR":        LOCAL_TEMP_DIR,
+	}).Infoln("DASH_CLIENT: Command Line Parameters:")
+}
+
+/*
+get_random_folder_path: returns random folder
+*/
+func get_random_folder_path() string {
 	return LOCAL_TEMP_DIR + config.LOCAL_SEGMENT_FOLDER_PREFIX + strconv.Itoa(random(1000, 100000)) + "/"
 }
 

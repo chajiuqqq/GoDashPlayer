@@ -36,7 +36,7 @@ type SegmentQueue []*SegmentInfo
 func (dp *DashPlayer) start() {
 	dp.setState("INITIAL_BUFFERING")
 
-	log.Info("Starting the Player")
+	log.Info("DASH_PLAYER: Starting the Player")
 	go dp.start_player()
 }
 
@@ -48,7 +48,7 @@ func (dp *DashPlayer) setState(state string) {
 		log.WithFields(log.Fields{
 			"from": dp.PlaybackState,
 			"to":   state,
-		}).Info("Changing Player State")
+		}).Info("DASH_PLAYER: Changing Player State")
 
 		dp.PlaybackState = state
 		dp.PlaybackStateLock.Unlock()
@@ -71,9 +71,9 @@ func (dp *DashPlayer) writeToBuffer(segment SegmentInfo) {
 	log.WithFields(log.Fields{
 		"segment": segment["segment_number"],
 		"time":    FloatToString(GetNow() - dp.ActualStartTime),
-	}).Info("Writing segment ")
+	}).Info("DASH_CLIENT: Writing segment")
 
-	dp.Buffer.Push(&segment)
+	dp.Buffer.push(&segment)
 	dp.BufferLock.Unlock()
 
 	tmpBufferLength, err := strconv.ParseFloat(segment["playback_length"], 64)
@@ -86,10 +86,24 @@ func (dp *DashPlayer) writeToBuffer(segment SegmentInfo) {
 	dp.BufferLengthLock.Unlock()
 }
 
+func (dp *DashPlayer) clearBuffer() {
+
+	dp.BufferLock.Lock()
+	/*	for i := 0; i <= dp.Buffer.Len(); i++ {
+		dp.Buffer.Pop()
+	}*/
+	dp.Buffer.clear()
+	dp.BufferLock.Unlock()
+
+	dp.BufferLengthLock.Lock()
+	dp.BufferLength = 0
+	dp.BufferLengthLock.Unlock()
+}
+
 func (dp *DashPlayer) readFromBuffer() SegmentInfo {
 
 	dp.BufferLock.Lock()
-	nextSegment := *dp.Buffer.Pop()
+	nextSegment := *dp.Buffer.pop()
 	dp.BufferLock.Unlock()
 
 	tmpBufferLength, err := strconv.ParseFloat((nextSegment)["playback_length"], 64)
@@ -106,7 +120,7 @@ func (dp *DashPlayer) readFromBuffer() SegmentInfo {
 
 func (dp *DashPlayer) __init__(videoLength float64, segmentDuration float64) {
 
-	log.Info("Initializing the Buffer")
+	log.Info("DASH_PLAYER: Initializing the Buffer")
 	dp.PlaybackStartTime = -1 //None
 	dp.PlaybackDuration = videoLength
 	dp.SegmentDuration = segmentDuration
@@ -141,7 +155,7 @@ func (dp *DashPlayer) __init__(videoLength float64, segmentDuration float64) {
 		"InitialBuffer":    dp.InitialBuffer,
 		"Alpha":            dp.Alpha,
 		"Beta":             dp.Beta,
-	}).Info("Video Info")
+	}).Info("DASH_PLAYER: Video Info")
 
 }
 
@@ -156,7 +170,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 
 	log.WithFields(log.Fields{
 		"PlaybackDuration": dp.PlaybackDuration,
-	}).Info("Initialized player with video length")
+	}).Info("DASH_PLAYER: Initialized player with video length")
 
 	for {
 		if dp.PlaybackState == "END" {
@@ -183,15 +197,15 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 			} else {
 				//# If the RE_BUFFERING_DURATION is greater than the remaing length of the video then do not wait
 				remainingPlaybackTime := dp.PlaybackDuration - dp.PlaybackTimer.time()
-				if dp.Buffer.Len() >= config.RE_BUFFERING_COUNT ||
-					(config.RE_BUFFERING_COUNT*dp.SegmentDuration >= remainingPlaybackTime && dp.Buffer.Len() > 0) {
+				if dp.Buffer.len() >= config.RE_BUFFERING_COUNT ||
+					(config.RE_BUFFERING_COUNT*dp.SegmentDuration >= remainingPlaybackTime && dp.Buffer.len() > 0) {
 
 					buffering = false
 					if interruptionStart > -1 {
 						interruptionEnd := GetNow()
 						interruption := interruptionEnd - interruptionStart
 						interruptionStart = -1 //None
-						fmt.Println("interruption seconds:", interruption)
+						fmt.Println("DASH_PLAYER: interruption seconds:", interruption)
 					}
 					dp.setState("PLAY")
 				}
@@ -199,14 +213,14 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 		} //END IF BUFFERING
 
 		if dp.PlaybackState == "INITIAL_BUFFERING" {
-			if dp.Buffer.Len() < config.INITIAL_BUFFERING_COUNT {
+			if dp.Buffer.len() < config.INITIAL_BUFFERING_COUNT {
 				initialWait = GetNow() - startTime
 				continue
 			} else {
 
 				log.WithFields(log.Fields{
 					"initialWait": initialWait,
-				}).Info("Initial Waiting Time")
+				}).Info("DASH_PLAYER: Initial Waiting Time")
 
 				dp.setState("PLAY")
 			}
@@ -218,7 +232,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 			if dp.PlaybackTimer.time() == dp.PlaybackDuration {
 				dp.setState("END")
 			}
-			if dp.Buffer.Len() == 0 {
+			if dp.Buffer.len() == 0 {
 				dp.PlaybackTimer.pause()
 				dp.setState("BUFFERING")
 				continue
@@ -231,7 +245,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 				"Segment":       playSegment["segment_number"],
 				"Playback Time": dp.PlaybackTimer.time(),
 				"Bitrate":       playSegment["bitrate"],
-			}).Info("Reading the segment from the buffer at playtime")
+			}).Info("DASH_PLAYER: Reading the segment from the buffer at playtime")
 
 			// Calculate time playback when the segment finishes
 			playbackLength, err := strconv.ParseFloat(playSegment["playback_length"], 64)
@@ -255,11 +269,11 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 
 					log.WithFields(log.Fields{
 						"PlaybackDuration": dp.PlaybackDuration,
-					}).Info("Completed the video playback seconds")
+					}).Info("DASH_PLAYER: Completed the video playback seconds")
 
 					dp.PlaybackTimer.pause()
 					dp.setState("END")
-					log.Info("PLAYER ENDED")
+					log.Info("DASH_PLAYER: PLAYER ENDED")
 					return //returns from this function (start_player)
 				}
 				noBreak = false
@@ -282,26 +296,30 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 					log.WithFields(log.Fields{
 						"SegmentLimit":  dp.SegmentLimit,
 						"segmentNumber": segmentNumber,
-					}).Info("Segment limit reached, Player will stop ")
+					}).Info("DASH_PLAYER: Segment limit reached, Player will stop ")
 
 					dp.setState("STOP")
 				}
 			}
-
 		} //END IF STATE=PLAY
 	} //FOR INFITITE LOOP
 } // END start_player
 
-func (q *SegmentQueue) Push(n *SegmentInfo) {
+func (q *SegmentQueue) clear() {
+	*q = (*q)[:0]
+	return
+}
+
+func (q *SegmentQueue) push(n *SegmentInfo) {
 	*q = append(*q, n)
 }
 
-func (q *SegmentQueue) Pop() (n *SegmentInfo) {
+func (q *SegmentQueue) pop() (n *SegmentInfo) {
 	n = (*q)[0]
 	*q = (*q)[1:]
 	return
 }
 
-func (q *SegmentQueue) Len() int {
+func (q *SegmentQueue) len() int {
 	return len(*q)
 }

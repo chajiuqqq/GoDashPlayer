@@ -6,6 +6,7 @@ import (
 	"flag"
 	"github.com/lucas-clemente/quic-go/h2quic"
 	"github.com/sevketarisu/GoDashPlayer/utils"
+	"golang.org/x/net/http2"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 func main() {
 	verbose := flag.Bool("v", false, "verbose")
 	quic := flag.Bool("quic", false, "quic")
+	h2 := flag.Bool("h2", false, "h2")
 	flag.Parse()
 	args := flag.Args()
 
@@ -27,18 +29,12 @@ func main() {
 	}
 	utils.SetLogTimeFormat("")
 
-	//	urls := flag.Args()
-	//urls := []string{"a", "b", "c", "d"}
-
-	//url_base := "https://caddy.quic/media/BigBuckBunny/4sec/bunny_3936261bps/BigBuckBunny_4s$SEGMENT$.m4s"
-
 	segment_limit, _ := strconv.Atoi(args[0])
 	url_base := args[1]
 	//url_base = "https://caddy.quic/media/BigBuckBunny/4sec/bunny_3936261bps/BigBuckBunny_4s$SEGMENT$.m4s"
 	var hclient *http.Client
 
-	var urls []string
-	urls = make([]string, segment_limit)
+	urls := make([]string, segment_limit)
 
 	for i := 0; i < len(urls); i++ {
 		urls[i] = strings.Replace(url_base, "$SEGMENT$", strconv.Itoa(i+1), -1)
@@ -47,39 +43,53 @@ func main() {
 	if *quic {
 		utils.Infof("QUIC CLIENT")
 		utils.Infof(url_base)
+
 		hclient = &http.Client{
 			Transport: &h2quic.RoundTripper{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 		}
-	} else {
-		utils.Infof("HTTP CLIENT")
+	} else if *h2 {
+		utils.Infof("HTTP2 CLIENT")
 		utils.Infof(url_base)
+
+		tr := &http2.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		hclient = &http.Client{Transport: tr}
+
+	} else {
+		utils.Infof("HTTP1.1 CLIENT")
+		utils.Infof(url_base)
+
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 		hclient = &http.Client{Transport: tr}
+
 	}
 	var wg sync.WaitGroup
 	wg.Add(len(urls))
 	startTime := GetNow()
 	for _, addr := range urls {
-		//utils.Infof("GET %s", addr)
+		utils.Infof("GET %s", addr)
 		go func(addr string) {
 			utils.Infof("Downloading %s", addr)
 			rsp, err := hclient.Get(addr)
 			if err != nil {
 				panic(err)
 			}
+			defer rsp.Body.Close()
 
 			body := &bytes.Buffer{}
 			_, err = io.Copy(body, rsp.Body)
 			if err != nil {
 				panic(err)
 			}
-			//	utils.Infof("Request Body:")
-			//	utils.Infof("%s", body.Bytes())
+			//utils.Infof("Request Body:")
+			utils.Infof("%s", body.Bytes())
 			utils.Infof("Finished %s:", addr)
 			wg.Done()
 		}(addr)
+		//	time.Sleep(100 * time.Millisecond)
 	}
 	wg.Wait()
 	utils.Infof("TOTAL DURATION: %s", FloatToString((GetNow() - startTime)))

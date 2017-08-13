@@ -54,8 +54,8 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
-			utils.Infof("Response Body of:", addr)
-			//	utils.Infof("%s", body.Bytes())
+			utils.Infof("Response Body of: %s", addr)
+			utils.Infof("%s", body.Bytes())
 			wg.Done()
 			//rsp.Body.Close()
 		}(addr)
