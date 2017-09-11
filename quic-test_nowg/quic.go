@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/sevketarisu/GoDashPlayer/utils"
+	log "github.com/sirupsen/logrus"
 	//"bytes"
 	"crypto/tls"
 	"flag"
@@ -14,17 +14,10 @@ import (
 )
 
 func main() {
-	verbose := flag.Bool("v", false, "verbose")
+
 	quic := flag.Bool("quic", false, "quic")
 	flag.Parse()
 	args := flag.Args()
-
-	if *verbose {
-		utils.SetLogLevel(utils.LogLevelDebug)
-	} else {
-		utils.SetLogLevel(utils.LogLevelInfo)
-	}
-	utils.SetLogTimeFormat("")
 
 	//	urls := flag.Args()
 	//urls := []string{"a", "b", "c", "d"}
@@ -44,14 +37,14 @@ func main() {
 	}
 
 	if *quic {
-		utils.Infof("QUIC CLIENT")
-		utils.Infof(url_base)
+		log.Info("QUIC CLIENT")
+		log.Info(url_base)
 		hclient = &http.Client{
 			Transport: &h2quic.RoundTripper{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 		}
 	} else {
-		utils.Infof("HTTP CLIENT")
-		utils.Infof(url_base)
+		log.Info("HTTP CLIENT")
+		log.Info(url_base)
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
@@ -63,9 +56,9 @@ func main() {
 	for _, addr := range urls {
 		//utils.Infof("GET %s", addr)
 
-		utils.Infof("Downloading %s", addr)
+		log.Info("Downloading %s", addr)
 		response, err := hclient.Get(addr)
-		utils.Infof("get finished %s", addr)
+		log.Info("get finished %s", addr)
 		if err != nil {
 			panic(err)
 		}
@@ -80,11 +73,11 @@ func main() {
 
 		//	utils.Infof("Request Body:")
 		//	utils.Infof("%s", body.Bytes())
-		utils.Infof("Finished %s:", addr)
+		log.Info("Finished %s:", addr)
 
 	}
 
-	utils.Infof("TOTAL DURATION: %s", FloatToString((GetNow() - startTime)))
+	log.Info("TOTAL DURATION: %s", FloatToString((GetNow() - startTime)))
 }
 
 func FloatToString(input_num float64) string {

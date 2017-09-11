@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -12,26 +11,16 @@ import (
 	"time"
 
 	"github.com/lucas-clemente/quic-go/h2quic"
-	"github.com/sevketarisu/GoDashPlayer/utils"
+	log "github.com/sirupsen/logrus"
 )
 
 //var b *bytes.Buffer
 
 func main() {
-	verbose := flag.Bool("v", false, "verbose")
 	flag.Parse()
 	urls := flag.Args()
 
-	if *verbose {
-		utils.SetLogLevel(utils.LogLevelDebug)
-		fmt.Println("Verbose:", *verbose)
-	} else {
-		utils.SetLogLevel(utils.LogLevelInfo)
-		fmt.Println("Verbose:", *verbose)
-	}
-	utils.SetLogTimeFormat("")
-
-	utils.Infof("QUIC CLIENT %s", urls)
+	log.Info("QUIC CLIENT %s", urls)
 
 	hclient := &http.Client{
 		Transport: &h2quic.RoundTripper{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
@@ -41,27 +30,27 @@ func main() {
 	wg.Add(len(urls))
 	startTime := GetNow()
 	for _, addr := range urls {
-		utils.Infof("GET %s", addr)
+		log.Info("GET %s", addr)
 		go func(addr string) {
 			rsp, err := hclient.Get(addr)
 			if err != nil {
 				panic(err)
 			}
-			utils.Infof("Got response for %s: %#v", addr, rsp)
+			log.Info("Got response for %s: %#v", addr, rsp)
 
 			body := &bytes.Buffer{}
 			_, err = io.Copy(body, rsp.Body)
 			if err != nil {
 				panic(err)
 			}
-			utils.Infof("Response Body of: %s", addr)
-			utils.Infof("%s", body.Bytes())
+			log.Info("Response Body of: %s", addr)
+			log.Info("%s", body.Bytes())
 			wg.Done()
 			//rsp.Body.Close()
 		}(addr)
 	}
 	wg.Wait()
-	utils.Infof("TOTAL DURATION: %s", FloatToString((GetNow() - startTime)))
+	log.Info("TOTAL DURATION: %s", FloatToString((GetNow() - startTime)))
 }
 
 func GetNow() float64 {

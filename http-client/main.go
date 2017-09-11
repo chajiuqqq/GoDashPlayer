@@ -10,22 +10,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sevketarisu/GoDashPlayer/utils"
+	log "github.com/sirupsen/logrus"
 )
 
 func main() {
-	verbose := flag.Bool("v", false, "verbose")
+
 	flag.Parse()
 	urls := flag.Args()
 
-	if *verbose {
-		utils.SetLogLevel(utils.LogLevelDebug)
-	} else {
-		utils.SetLogLevel(utils.LogLevelInfo)
-	}
-	utils.SetLogTimeFormat("")
-
-	utils.Infof("HTTP1.1 CLIENT %s", urls)
+	log.Info("HTTP1.1 CLIENT")
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -36,27 +29,27 @@ func main() {
 	wg.Add(len(urls))
 	startTime := GetNow()
 	for _, addr := range urls {
-		utils.Infof("GET %s", addr)
+		log.Info("GET %s", addr)
 		go func(addr string) {
 			rsp, err := hclient.Get(addr)
 			if err != nil {
 				panic(err)
 			}
-			utils.Infof("Got response for %s: %#v", addr, rsp)
+			log.Info("Got response for %s: %#v", addr, rsp)
 
 			body := &bytes.Buffer{}
 			_, err = io.Copy(body, rsp.Body)
 			if err != nil {
 				panic(err)
 			}
-			utils.Infof("Response Body of:", addr)
-			utils.Infof("%s", body.Bytes())
+			log.Info("Response Body of:", addr)
+			log.Info("%s", body.Bytes())
 			wg.Done()
 		}(addr)
 	}
 	wg.Wait()
-	utils.Infof("TOTAL DURATION: %s", FloatToString((GetNow() - startTime)))
-	utils.Infof("HTTP1.1 CLIENT BITTI")
+	log.Info("TOTAL DURATION: %s", FloatToString((GetNow() - startTime)))
+	log.Info("HTTP1.1 CLIENT BITTI")
 }
 
 func GetNow() float64 {

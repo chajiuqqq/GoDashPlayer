@@ -33,9 +33,12 @@ var playbackType string
 var mpdFullUrl string
 var quic bool
 var h2 bool
+var h1 bool
 var LOCAL_TEMP_DIR string
 var jumpSecondsArgs []string
 var proto bool
+var java bool
+var protoClientPort string
 
 type DashPlayback struct {
 	minBufferTime    float64                  //as seconds
@@ -667,6 +670,8 @@ func get_mpd(mpdFullUrl string) (string, *http.Client, *io.WriteCloser, *bufio.S
 	//	var cmdWriter *io.WriteCloser
 	var scanner *bufio.Scanner
 	var localTempFolder string
+	var cmdName string
+	var cmdArgs []string
 
 	localTempFolder = get_random_folder_path()
 
@@ -684,16 +689,14 @@ func get_mpd(mpdFullUrl string) (string, *http.Client, *io.WriteCloser, *bufio.S
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 		hclient = &http.Client{Transport: tr}
-	} else if proto { //use PROTO
-
-	} else { //use HTTP1.1
+	} else if h1 { //use HTTP1.1
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 		hclient = &http.Client{Transport: tr}
 	}
 
-	if !proto {
+	if quic || h2 || h1 {
 
 		response, err := hclient.Get(mpdFullUrl)
 		if err != nil {
@@ -716,17 +719,38 @@ func get_mpd(mpdFullUrl string) (string, *http.Client, *io.WriteCloser, *bufio.S
 			panic(err)
 		}
 	} else {
-		cmdName := "/home/sevket/proto-quic/src/out/Default/quic_client"
-		cmdArgs := []string{"--host=ec2-13-56-87-190.us-west-1.compute.amazonaws.com",
-			"--port=53",
-			"--v=0",
-			"--disable-certificate-verification",
-			"--folder=" + get_random_folder_path(),
-			"x"}
+		if proto {
+			cmdName = config.PROTO_QUIC_CLIENT_EXEC
+			cmdArgs = []string{"--host=ec2-13-56-87-190.us-west-1.compute.amazonaws.com",
+				"--port=" + protoClientPort,
+				"--v=0",
+				"--disable-certificate-verification",
+				"--folder=" + get_random_folder_path(),
+				"x"}
 
-		log.WithFields(log.Fields{
-			"cmdArgs": cmdArgs,
-		}).Info("DASH_CLIENT: cmdArgs")
+			log.WithFields(log.Fields{
+				"cmdArgs": cmdArgs,
+				"cmdName": cmdName,
+			}).Info("DASH_CLIENT: cmdArgs")
+		}
+
+		if java {
+			cmdName = "/usr/lib/jvm/java-8-oracle/bin/java"
+			/*	cmdArgs = []string{"-classpath",
+				"/home/sevket/eclipse_workspace/javahttpclient/target/classes:" +
+					"/home/sevket/.m2/repository/org/apache/httpcomponents/httpclient/4.5.2/httpclient-4.5.2.jar:" +
+					"/home/sevket/.m2/repository/org/apache/httpcomponents/httpcore/4.4.4/httpcore-4.4.4.jar:" +
+					"/home/sevket/.m2/repository/commons-logging/commons-logging/1.2/commons-logging-1.2.jar:" +
+					"/home/sevket/.m2/repository/commons-codec/commons-codec/1.9/commons-codec-1.9.jar",
+				"javahttpclient.DownloadFileHttpCilent" + " " + get_random_folder_path()
+			}*/
+			cmdArgs = []string{"java -version"}
+
+			log.WithFields(log.Fields{
+				"cmdArgs": cmdArgs,
+				"cmdName": cmdName,
+			}).Info("DASH_CLIENT: cmdArgs")
+		}
 
 		cmd := exec.Command(cmdName, cmdArgs...)
 		cmdReader, err1 := cmd.StdoutPipe()
@@ -758,6 +782,7 @@ func get_mpd(mpdFullUrl string) (string, *http.Client, *io.WriteCloser, *bufio.S
 		<-done
 
 	}
+
 	return mpdLocalFileName, hclient, adrCmdWriter, scanner, localTempFolder
 }
 
@@ -790,15 +815,18 @@ func download_with_console(done chan bool, segmentUrl string, scanner *bufio.Sca
 parse_arguments: parses and assings command line parameters
 */
 func parse_arguments() {
+	flag.StringVar(&protoClientPort, "port", "443", "Port number for proto-client ")
 	flag.IntVar(&segmentLimitParameter, "n", 200, "The Segment number limit ")
 	flag.BoolVar(&list, "l", false, "List all the representations")
 	flag.BoolVar(&download, "d", false, "Keep the video files after playback")
 	flag.BoolVar(&quic, "quic", false, "Enable quic")
 	flag.BoolVar(&proto, "proto", false, "Enable proto-quic client console for downloading segments")
 	flag.BoolVar(&h2, "h2", false, "Enable http2")
+	flag.BoolVar(&h1, "h1", false, "Enable http1.1")
 	flag.StringVar(&playbackType, "p", "basic", "Playback type (basic, sara, netflix, or all)")
 	flag.StringVar(&mpdFullUrl, "m", "https://caddy.quic/BigBuckBunny_4s.mpd", "Url to the MPD File")
 	flag.StringVar(&LOCAL_TEMP_DIR, "f", "/home/sevket/go/src/github.com/sevketarisu/GoDashPlayer/dashquic/_tmp/DOWNLOADED/", "Temp folder for downloading segments")
+	flag.BoolVar(&java, "java", false, "Enable java-client console for downloading segments")
 	flag.Parse()
 }
 
