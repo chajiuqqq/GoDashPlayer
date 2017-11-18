@@ -11,23 +11,24 @@ import (
 )
 
 type DashPlayer struct {
-	PlaybackStartTime float64
-	PlaybackDuration  float64
-	SegmentDuration   float64
-	PlaybackTimer     StopWatch
-	ActualStartTime   float64
-	PlaybackState     string
-	PlaybackStateLock sync.Mutex
-	MaxBufferSize     float64
-	BufferLength      float64
-	BufferLengthLock  sync.Mutex
-	InitialBuffer     float64
-	Alpha             float64
-	Beta              float64
-	SegmentLimit      int
-	Buffer            SegmentQueue
-	BufferLock        sync.Mutex
-	CurrentSegment    float64
+	PlaybackStartTime  float64
+	PlaybackDuration   float64
+	SegmentDuration    float64
+	PlaybackTimer      StopWatch
+	ActualStartTime    float64
+	PlaybackState      string
+	PlaybackStateLock  sync.Mutex
+	MaxBufferSize      float64
+	BufferLength       float64
+	BufferLengthLock   sync.Mutex
+	InitialBuffer      float64
+	Alpha              float64
+	Beta               float64
+	SegmentLimit       int
+	Buffer             SegmentQueue
+	BufferLock         sync.Mutex
+	currentSegment     float64
+	currentSegmentLock sync.Mutex
 }
 
 type SegmentInfo map[string]string
@@ -100,6 +101,22 @@ func (dp *DashPlayer) clearBuffer() {
 	dp.BufferLengthLock.Unlock()
 }
 
+func (dp *DashPlayer) setCurrentSegment(currentSegment float64) {
+
+	dp.currentSegmentLock.Lock()
+	dp.currentSegment = currentSegment
+	dp.currentSegmentLock.Unlock()
+
+}
+
+func (dp *DashPlayer) getCurrentSegment() float64 {
+
+	dp.currentSegmentLock.Lock()
+	currentSegment := dp.currentSegment
+	dp.currentSegmentLock.Unlock()
+	return currentSegment
+}
+
 func (dp *DashPlayer) readFromBuffer() SegmentInfo {
 
 	dp.BufferLock.Lock()
@@ -146,7 +163,7 @@ func (dp *DashPlayer) __init__(videoLength float64, segmentDuration float64) {
 	dp.SegmentLimit = -1 //None
 	dp.Buffer = SegmentQueue{}
 	dp.BufferLock = sync.Mutex{}
-	dp.CurrentSegment = -1 //None
+	dp.setCurrentSegment(-1) //None
 
 	log.WithFields(log.Fields{
 		"PlaybackDuration": dp.PlaybackDuration,
@@ -167,6 +184,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 	var buffering bool = false
 	var interruptionStart float64 = -1.0 //None
 	var noBreak bool = false
+	var totalInterruption float64 = 0.0
 
 	log.WithFields(log.Fields{
 		"PlaybackDuration": dp.PlaybackDuration,
@@ -205,6 +223,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 						interruptionEnd := GetNow()
 						interruption := interruptionEnd - interruptionStart
 						interruptionStart = -1 //None
+						totalInterruption = totalInterruption + interruption
 						fmt.Println("DASH_PLAYER: interruption seconds:", interruption)
 					}
 					dp.setState("PLAY")
@@ -229,8 +248,16 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 		if dp.PlaybackState == "PLAY" {
 
 			// Check of the buffer has any segments
-			if dp.PlaybackTimer.time() == dp.PlaybackDuration {
+
+			log.WithFields(log.Fields{
+				"dp.Playback Duration":                   dp.PlaybackDuration,
+				"dp.Playback Time":                       dp.PlaybackTimer.time(),
+				"(dp.CurrentSegment*dp.SegmentDuration)": dp.getCurrentSegment() * dp.SegmentDuration,
+			}).Info("DASH_JUMP: Player info for END control")
+
+			if dp.PlaybackDuration == dp.getCurrentSegment()*dp.SegmentDuration {
 				dp.setState("END")
+				fmt.Println("DASH_PLAYER: TOTAL interruption seconds:", totalInterruption)
 			}
 			if dp.Buffer.len() == 0 {
 				dp.PlaybackTimer.pause()
@@ -253,6 +280,12 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 				panic(err)
 			}
 
+			newCurrentSegment, err2 := strconv.ParseFloat(playSegment["segment_number"], 64)
+			if err2 != nil {
+				panic(err2)
+			}
+			dp.setCurrentSegment(newCurrentSegment)
+
 			future := dp.PlaybackTimer.time() + playbackLength
 
 			// # Start the playback timer
@@ -273,6 +306,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 
 					dp.PlaybackTimer.pause()
 					dp.setState("END")
+					fmt.Println("DASH_PLAYER: TOTAL interruption seconds:", totalInterruption)
 					log.Info("DASH_PLAYER: PLAYER ENDED")
 					return //returns from this function (start_player)
 				}

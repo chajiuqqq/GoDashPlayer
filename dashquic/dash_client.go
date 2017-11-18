@@ -39,6 +39,10 @@ var jumpSecondsArgs []string
 var proto bool
 var java bool
 var protoClientPort string
+var protoClientHostName string
+var repeatCount int
+var sumOfTotalDownloaded float64
+var sumOfPlaybackTime float64
 
 type DashPlayback struct {
 	minBufferTime    float64                  //as seconds
@@ -68,6 +72,8 @@ func main() {
 	verbose := flag.Bool("v", false, "verbose")
 	jump := flag.Bool("j", false, "jump")
 
+	//log.SetLevel(log.ErrorLevel)
+
 	//get other program arguments
 	parse_arguments()
 	print_arguments()
@@ -76,7 +82,7 @@ func main() {
 	if *verbose {
 		log.SetLevel(log.DebugLevel)
 	} else {
-		log.SetLevel(log.InfoLevel)
+		log.SetLevel(log.ErrorLevel)
 	}
 	if *jump {
 		jumpSecondsArgs = flag.Args()
@@ -93,12 +99,6 @@ func main() {
 
 	mpdFile, hclient, cmdWriter, scanner, localTempFolder := get_mpd(mpdFullUrl)
 
-	/*log.WithFields(log.Fields{
-		"hclient":   hclient,
-		"cmdWriter": cmdWriter,
-		"scanner":   scanner,
-	}).Info("DASH_CLIENT: Clients got")*/
-
 	log.WithFields(log.Fields{
 		"mpdFile": mpdFile,
 	}).Info("DASH_CLIENT: Downloaded MPD file")
@@ -106,42 +106,62 @@ func main() {
 	//get domain name from mpd full url
 	domainName := get_domain_name(mpdFullUrl)
 
-	//create a new DashPlayback object and hold pointer
-	dpObject := &DashPlayback{} //&DashPlayback{} = new(DashPlayback)
+	sumOfTotalDownloaded = 0.0
+	sumOfPlaybackTime = 0.0
 
-	log.WithFields(log.Fields{
-		"mpdFile": mpdFile,
-	}).Info("DASH_CLIENT: Reading MPD file")
+	for runNo := 1; runNo <= repeatCount; runNo++ {
 
-	//read mpd file and get videoSegmentDuration
-	videoSegmentDuration := read_mpd(mpdFile, dpObject)
+		//create a new DashPlayback object and hold pointer
+		dpObject := &DashPlayback{} //&DashPlayback{} = new(DashPlayback)
 
-	log.WithFields(log.Fields{
-		"representation count": len(dpObject.video),
-	}).Info("DASH_CLIENT: MPD file DASH media video")
+		log.WithFields(log.Fields{
+			"mpdFile": mpdFile,
+		}).Info("DASH_CLIENT: Reading MPD file")
 
-	//if -l is provided in program arguments only list presentations and exit immediately
+		//read mpd file and get videoSegmentDuration
+		videoSegmentDuration := read_mpd(mpdFile, dpObject)
 
-	if list {
-		log.Info("DASH_CLIENT: Printing representations")
-		print_representations(dpObject)
-		log.Info("DASH_CLIENT: Printed representations")
+		log.WithFields(log.Fields{
+			"representation count": len(dpObject.video),
+		}).Info("DASH_CLIENT: MPD file DASH media video")
+
+		//if -l is provided in program arguments only list presentations and exit immediately
+
+		if list {
+			log.Info("DASH_CLIENT: Printing representations")
+			print_representations(dpObject)
+			log.Info("DASH_CLIENT: Printed representations")
+		}
+
+		log.Info("DASH_CLIENT: Starting BASIC playback")
+
+		//start playback with BASIC algorith
+
+		fmt.Println("###dash_client.main() starting  start_playback_smart: ### Run No:", runNo, "/", repeatCount)
+		playbackTime, totalDownloaded := start_playback_smart(hclient, cmdWriter, scanner, dpObject, domainName, "BASIC", download, videoSegmentDuration, jumpSecondsArgs, localTempFolder, runNo)
+
+		fmt.Println("###dash_client.main() playbackTime:       ### Run No:", runNo, "->", playbackTime)
+		fmt.Println("###dash_client.main() totalDownloaded KB: ### Run No:", runNo, "->", totalDownloaded/1024)
+		fmt.Println("###dash_client.main() Bytes per Second:   ### Run No:", runNo, "->", totalDownloaded/playbackTime)
+
+		sumOfTotalDownloaded = sumOfTotalDownloaded + totalDownloaded
+		sumOfPlaybackTime = sumOfPlaybackTime + playbackTime
 	}
 
-	//start playback with BASIC algorith
-	log.Info("DASH_CLIENT: Starting BASIC playback")
-	start_playback_smart(hclient, cmdWriter, scanner, dpObject, domainName, "BASIC", download, videoSegmentDuration, jumpSecondsArgs, localTempFolder)
+	fmt.Println("###dash_client.main() TOTAL playbackTime: ###  :", sumOfPlaybackTime)
+	fmt.Println("###dash_client.main() TOTAL totalDownloaded KB: ###  :", sumOfTotalDownloaded/1024)
+	fmt.Println("###dash_client.main() TOTAL Bytes per Second: ###  :", sumOfTotalDownloaded/sumOfPlaybackTime)
 
 	if proto {
 		io.WriteString(*cmdWriter, "exit\n")
 	}
-	// dash_client is finishing
+
 	fmt.Println("###dash_client.main() FINISHED###")
 
 }
 
 func start_playback_smart(hclient *http.Client, cmdWriter *io.WriteCloser, scanner *bufio.Scanner, dpObject *DashPlayback, domainName string,
-	playbackType string, download bool, videoSegmentDuration float64, jumpSeconds []string, localTempFolder string) {
+	playbackType string, download bool, videoSegmentDuration float64, jumpSeconds []string, localTempFolder string, runNo int) (float64, float64) {
 
 	// create a new DashPlayer object and hold pointer
 	dp := &DashPlayer{}
@@ -356,49 +376,59 @@ func start_playback_smart(hclient *http.Client, cmdWriter *io.WriteCloser, scann
 
 		// seek control
 
-		log.WithFields(log.Fields{
+		/*	log.WithFields(log.Fields{
 			"jumpCounter":          jumpCounter,
 			"len(jumpSecondsArgs)": len(jumpSecondsArgs),
-		}).Info("DASH_JUMP: Jump control")
+		}).Info("DASH_JUMP: Jump control")*/
 
 		if jumpCounter < len(jumpSecondsArgs) {
 			j := strings.Split(jumpSecondsArgs[jumpCounter], ",")
 			jumpAtSecond, err := strconv.ParseFloat(j[0], 64)
 			jumpToSecond, err := strconv.ParseFloat(j[1], 64)
-			//	log.Info("DASH_CLIENT: jumpToSecond:", jumpToSecond)
-			//	log.Info("DASH_CLIENT: dp.PlaybackTimer.time:", dp.PlaybackTimer.time())
 			if err != nil {
 				panic(err)
 			}
-			if dp.PlaybackTimer.time() == jumpAtSecond {
+
+			log.WithFields(log.Fields{
+				"dp.CurrentSegment":                          dp.getCurrentSegment(),
+				"jumpAtSecond":                               jumpAtSecond,
+				"(dp.CurrentSegment * videoSegmentDuration)": int(dp.getCurrentSegment() * videoSegmentDuration),
+			}).Info("DASH_JUMP: Checking Jump")
+
+			//if dp.PlaybackTimer.time() >= jumpAtSecond {
+			if (dp.getCurrentSegment() * videoSegmentDuration) >= jumpAtSecond {
 				log.WithFields(log.Fields{
-					"dp.PlaybackTimer.time()": dp.PlaybackTimer.time(),
-					"jumpAtSecond":            jumpAtSecond,
-					"jumpToSecond":            jumpToSecond,
-					"BufferLength":            dp.BufferLength,
-					"dp.Buffer.Len()":         dp.Buffer.len(),
-					"segmentNumber":           segmentNumber,
-					"jumpCounter":             jumpCounter,
+					"dp.CurrentSegment": dp.getCurrentSegment(),
+					"jumpAtSecond":      jumpAtSecond,
+					"jumpToSecond":      jumpToSecond,
+					"BufferLength":      dp.BufferLength,
+					"dp.Buffer.Len()":   dp.Buffer.len(),
+					"jumpCounter":       jumpCounter,
 				}).Info("DASH_JUMP: Clearing Buffer:")
 
 				dp.clearBuffer()
 				jumpCounter++
-				segmentNumber = int(jumpToSecond / 4)
+				segmentNumber = int(jumpToSecond / videoSegmentDuration)
+				dp.setCurrentSegment(float64(segmentNumber))
 
 				log.WithFields(log.Fields{
-					"dp.PlaybackTimer.time()": dp.PlaybackTimer.time(),
-					"jumpAtSecond":            jumpAtSecond,
-					"jumpToSecond":            jumpToSecond,
-					"BufferLength":            dp.BufferLength,
-					"dp.Buffer.Len()":         dp.Buffer.len(),
-					"segmentNumber":           segmentNumber,
-					"jumpCounter":             jumpCounter,
+					"jumpAtSecond":    jumpAtSecond,
+					"jumpToSecond":    jumpToSecond,
+					"BufferLength":    dp.BufferLength,
+					"dp.Buffer.Len()": dp.Buffer.len(),
+					"segmentNumber":   segmentNumber,
+					"jumpCounter":     jumpCounter,
 				}).Info("DASH_JUMP: Jumped To Segment:")
 
 			}
 		}
 		//	log.Info("DASH_CLIENT: jumpCounter:", jumpCounter)
 
+		if int(segmentNumber)%3 == 0 {
+			fmt.Println("###dash_client.main().startPlaybackSmart dp.PlaybackTimer  :##", runNo, "->", segmentNumber, "->", dp.PlaybackTimer.time())
+			fmt.Println("###dash_client.main().startPlaybackSmart totalDownloaded KB:##", runNo, "->", segmentNumber, "->", totalDownloaded/1024)
+			fmt.Println("###dash_client.main().startPlaybackSmart Bytes per Second  :##", runNo, "->", segmentNumber, "->", totalDownloaded/dp.PlaybackTimer.time())
+		}
 	} // main for loop for downloading segments
 
 	//after downloading all segments wait for player to stop
@@ -406,6 +436,7 @@ func start_playback_smart(hclient *http.Client, cmdWriter *io.WriteCloser, scann
 		time.Sleep(1 * time.Second)
 		log.Info("DASH_CLIENT: Client is waiting for player stop, current player state:", dp.PlaybackState)
 	}
+	return dp.PlaybackTimer.time(), totalDownloaded
 } //end of start_playback_smart
 
 /*
@@ -721,7 +752,7 @@ func get_mpd(mpdFullUrl string) (string, *http.Client, *io.WriteCloser, *bufio.S
 	} else {
 		if proto {
 			cmdName = config.PROTO_QUIC_CLIENT_EXEC
-			cmdArgs = []string{"--host=ec2-13-56-87-190.us-west-1.compute.amazonaws.com",
+			cmdArgs = []string{"--host=" + protoClientHostName, //ec2-13-56-87-190.us-west-1.compute.amazonaws.com",
 				"--port=" + protoClientPort,
 				"--v=0",
 				"--disable-certificate-verification",
@@ -819,7 +850,7 @@ func parse_arguments() {
 	flag.IntVar(&segmentLimitParameter, "n", 200, "The Segment number limit ")
 	flag.BoolVar(&list, "l", false, "List all the representations")
 	flag.BoolVar(&download, "d", false, "Keep the video files after playback")
-	flag.BoolVar(&quic, "quic", false, "Enable quic")
+	flag.BoolVar(&quic, "quic", false, "Enable quic with quic-go library")
 	flag.BoolVar(&proto, "proto", false, "Enable proto-quic client console for downloading segments")
 	flag.BoolVar(&h2, "h2", false, "Enable http2")
 	flag.BoolVar(&h1, "h1", false, "Enable http1.1")
@@ -827,6 +858,8 @@ func parse_arguments() {
 	flag.StringVar(&mpdFullUrl, "m", "https://caddy.quic/BigBuckBunny_4s.mpd", "Url to the MPD File")
 	flag.StringVar(&LOCAL_TEMP_DIR, "f", "/home/sevket/go/src/github.com/sevketarisu/GoDashPlayer/dashquic/_tmp/DOWNLOADED/", "Temp folder for downloading segments")
 	flag.BoolVar(&java, "java", false, "Enable java-client console for downloading segments")
+	flag.StringVar(&protoClientHostName, "host", "127.0.0.1", "Hostname for proto client")
+	flag.IntVar(&repeatCount, "r", 10, "Repeat count for playing file ")
 	flag.Parse()
 }
 

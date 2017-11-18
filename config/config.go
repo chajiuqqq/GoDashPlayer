@@ -11,7 +11,6 @@ const (
 	BASIC_UPPER_THRESHOLD       = 1.2
 	BASIC_THRESHOLD             = 10
 
-	PROTO_QUIC_SERVER_PORT = 53
-
-	PROTO_QUIC_CLIENT_EXEC = "/home/sevket/eclipse_kepler_workspace/proto-quic-src/src/out/Default/quic_client"
+	//PROTO_QUIC_CLIENT_EXEC = "/home/sevket/eclipse_kepler_workspace/proto-quic-src/src/out/Default/quic_client"
+	PROTO_QUIC_CLIENT_EXEC = "/home/sevket/proto-quic/src/out/Default/quic_client"
 )

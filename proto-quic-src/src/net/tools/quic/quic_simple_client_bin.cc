@@ -324,7 +324,11 @@ int main(int argc, char* argv[]) {
 			cout << "Exiting..." << endl;
 			return 0;
 		}
-		//cout << "Downloading file:" << surl << endl;
+		if (segmentUrl.compare("") == 0) {
+					cout << "skip empty file request:" << segmentUrl << endl;
+					continue;
+		}
+		cout << "Downloading file:" << segmentUrl << endl;
 
 		GURL gurl(segmentUrl);
 
@@ -416,3 +420,4 @@ int main(int argc, char* argv[]) {
 		}
 	}
 }
+
