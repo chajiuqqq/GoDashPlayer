@@ -215,8 +215,8 @@ func start_playback_smart(hclient *http.Client, cmdWriter *io.WriteCloser, scann
 		get_url_list(dpObject.video[bitrate], videoSegmentDuration, dpObject.playbackDuration, bitrate)
 
 		// replace $Bandwidth$ in segment url with releated bitrate value
-		if strings.Contains(dpObject.video[bitrate].initialization, "$Bandwidth$") {
-			dpObject.video[bitrate].initialization = strings.Replace(dpObject.video[bitrate].initialization, "$Bandwidth$", strconv.FormatFloat(bitrate, 'f', -1, 64), -1)
+		if strings.Contains(dpObject.video[bitrate].initialization, "$RepresentationID$") {
+			dpObject.video[bitrate].initialization = strings.Replace(dpObject.video[bitrate].initialization, "$RepresentationID$", dpObject.video[bitrate].id, -1)
 		}
 
 		// create a temp string[] that contains only initialization url for releated bitrate
