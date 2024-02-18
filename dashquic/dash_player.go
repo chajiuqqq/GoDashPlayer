@@ -1,8 +1,10 @@
 package main
 
 import (
-	"github.com/sevketarisu/GoDashPlayer/config"
-	//"bola/BolaClient/utils"
+	"dashquic/config"
+	"time"
+
+	// "bola/BolaClient/utils"
 	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
@@ -39,6 +41,22 @@ func (dp *DashPlayer) start() {
 
 	log.Info("DASH_PLAYER: Starting the Player")
 	go dp.start_player()
+	go func() {
+		cnt := 0
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			<-ticker.C // 等待一秒钟的触发事件
+			log.WithFields(log.Fields{
+				"sec":              cnt,
+				"dp.PlaybackState": dp.PlaybackState,
+				"dp.BufferLength":  dp.BufferLength,
+			}).Info("DASH_PLAYER: Player State")
+			cnt++
+		}
+	}()
+
 }
 
 func (dp *DashPlayer) setState(state string) {
@@ -138,12 +156,12 @@ func (dp *DashPlayer) readFromBuffer() SegmentInfo {
 func (dp *DashPlayer) __init__(videoLength float64, segmentDuration float64) {
 
 	log.Info("DASH_PLAYER: Initializing the Buffer")
-	dp.PlaybackStartTime = -1 //None
+	dp.PlaybackStartTime = -1 // None
 	dp.PlaybackDuration = videoLength
 	dp.SegmentDuration = segmentDuration
 	// Timers to keep track of playback time and the actual time
 	dp.PlaybackTimer = StopWatch{}
-	dp.ActualStartTime = -1 //None
+	dp.ActualStartTime = -1 // None
 	//  # Playback State
 	dp.PlaybackState = "INITIALIZED"
 	dp.PlaybackStateLock = sync.Mutex{}
@@ -156,14 +174,14 @@ func (dp *DashPlayer) __init__(videoLength float64, segmentDuration float64) {
 	// Duration of the current buffer
 	dp.BufferLength = 0
 	dp.BufferLengthLock = sync.Mutex{}
-	//# Buffer Constants
+	// # Buffer Constants
 	dp.InitialBuffer = 1
 	dp.Alpha = config.ALPHA_BUFFER_COUNT
 	dp.Beta = config.BETA_BUFFER_COUNT
-	dp.SegmentLimit = -1 //None
+	dp.SegmentLimit = -1 // None
 	dp.Buffer = SegmentQueue{}
 	dp.BufferLock = sync.Mutex{}
-	dp.setCurrentSegment(-1) //None
+	dp.setCurrentSegment(-1) // None
 
 	log.WithFields(log.Fields{
 		"PlaybackDuration": dp.PlaybackDuration,
@@ -182,7 +200,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 	var initialWait float64 = 0.0
 	var paused bool = false
 	var buffering bool = false
-	var interruptionStart float64 = -1.0 //None
+	var interruptionStart float64 = -1.0 // None
 	var noBreak bool = false
 	var totalInterruption float64 = 0.0
 
@@ -213,7 +231,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 				buffering = true
 				interruptionStart = GetNow()
 			} else {
-				//# If the RE_BUFFERING_DURATION is greater than the remaing length of the video then do not wait
+				// # If the RE_BUFFERING_DURATION is greater than the remaing length of the video then do not wait
 				remainingPlaybackTime := dp.PlaybackDuration - dp.PlaybackTimer.time()
 				if dp.Buffer.len() >= config.RE_BUFFERING_COUNT ||
 					(config.RE_BUFFERING_COUNT*dp.SegmentDuration >= remainingPlaybackTime && dp.Buffer.len() > 0) {
@@ -222,14 +240,14 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 					if interruptionStart > -1 {
 						interruptionEnd := GetNow()
 						interruption := interruptionEnd - interruptionStart
-						interruptionStart = -1 //None
+						interruptionStart = -1 // None
 						totalInterruption = totalInterruption + interruption
 						fmt.Println("DASH_PLAYER: interruption seconds:", interruption)
 					}
 					dp.setState("PLAY")
 				}
 			}
-		} //END IF BUFFERING
+		} // END IF BUFFERING
 
 		if dp.PlaybackState == "INITIAL_BUFFERING" {
 			if dp.Buffer.len() < config.INITIAL_BUFFERING_COUNT {
@@ -243,7 +261,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 
 				dp.setState("PLAY")
 			}
-		} //END IF INITIAL_BUFFERING
+		} // END IF INITIAL_BUFFERING
 
 		if dp.PlaybackState == "PLAY" {
 
@@ -308,12 +326,12 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 					dp.setState("END")
 					fmt.Println("DASH_PLAYER: TOTAL interruption seconds:", totalInterruption)
 					log.Info("DASH_PLAYER: PLAYER ENDED")
-					return //returns from this function (start_player)
+					return // returns from this function (start_player)
 				}
 				noBreak = false
 			}
 
-			if noBreak { //while else
+			if noBreak { // while else
 				playbackLength, err := strconv.ParseFloat(playSegment["playback_length"], 64)
 				if err != nil {
 					panic(err)
@@ -323,7 +341,7 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 				dp.BufferLengthLock.Unlock()
 			}
 
-			if dp.SegmentLimit != -1 { //None
+			if dp.SegmentLimit != -1 { // None
 				segmentNumber, _ := strconv.Atoi(playSegment["segment_number"])
 				if segmentNumber >= dp.SegmentLimit {
 
@@ -335,8 +353,8 @@ func (dp *DashPlayer) start_player() { // PLAYER THREAD START
 					dp.setState("STOP")
 				}
 			}
-		} //END IF STATE=PLAY
-	} //FOR INFITITE LOOP
+		} // END IF STATE=PLAY
+	} // FOR INFITITE LOOP
 } // END start_player
 
 func (q *SegmentQueue) clear() {

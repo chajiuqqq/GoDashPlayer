@@ -17,9 +17,9 @@ func (m *MPD) Decode(b []byte) error {
 // MPD represents root XML element.
 type MPD struct {
 	XMLNS                     string `xml:"xmlns,attr"`
-	MinBufferTime             string `xml:"minBufferTime,attr"` //PT1.500000S
+	MinBufferTime             string `xml:"minBufferTime,attr"` // PT1.500000S
 	Type                      string `xml:"type,attr"`
-	MediaPresentationDuration string `xml:"mediaPresentationDuration,attr"` //PT0H9M56.46S
+	MediaPresentationDuration string `xml:"mediaPresentationDuration,attr"` // PT0H9M56.46S
 	Profiles                  string `xml:"profiles,attr"`
 	Period                    Period `xml:"Period,omitempty"`
 }
@@ -40,21 +40,21 @@ type AdaptationSet struct {
 	MaxFrameRate     float64          `xml:"maxFrameRate,attr"`
 	Par              string           `xml:"par,attr"`
 	Representations  []Representation `xml:"Representation,omitempty"`
+	SegmentTemplate  SegmentTemplate  `xml:"SegmentTemplate,omitempty"`
 }
 
 // Representation represents XSD's RepresentationType.
 type Representation struct {
-	ID              string          `xml:"id,attr"`
-	MimeType        string          `xml:"mimeType,attr"`
-	Codecs          string          `xml:"codecs,attr"`
-	Width           int             `xml:"width,attr"`
-	Height          int             `xml:"height,attr"`
-	FrameRate       float64         `xml:"frameRate,attr"`
-	Sar             string          `xml:"sar,attr"`
-	StartWithSAP    int             `xml:"startWithSAP,attr"`
-	Bandwidth       float64         `xml:"bandwidth,attr"`
-	SegmentTemplate SegmentTemplate `xml:"SegmentTemplate,omitempty"`
-	SegmentSizes    []SegmentSize   `xml:"SegmentSize,omitempty"`
+	ID           string        `xml:"id,attr"`
+	MimeType     string        `xml:"mimeType,attr"`
+	Codecs       string        `xml:"codecs,attr"`
+	Width        int           `xml:"width,attr"`
+	Height       int           `xml:"height,attr"`
+	FrameRate    float64       `xml:"frameRate,attr"`
+	Sar          string        `xml:"sar,attr"`
+	StartWithSAP int           `xml:"startWithSAP,attr"`
+	Bandwidth    float64       `xml:"bandwidth,attr"`
+	SegmentSizes []SegmentSize `xml:"SegmentSize,omitempty"`
 }
 
 // SegmentTemplate represents XSD's SegmentTemplateType.
