@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"dashquic/config"
+	"dashquic/utils"
 	"flag"
 	"fmt"
 	h2quic "github.com/quic-go/quic-go/http3"
@@ -79,9 +80,11 @@ func main() {
 	parse_arguments()
 	print_arguments()
 
+	mpdFilename := utils.ExtractMpdFileName(mpdFullUrl)
 	// logger
 	// 创建日志文件
-	file, err := os.OpenFile("logs_20mins.json", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logFilename := fmt.Sprintf("logs_%s.json", mpdFilename)
+	file, err := os.OpenFile(logFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatal(err)
 	}
