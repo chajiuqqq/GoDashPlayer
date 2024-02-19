@@ -8,9 +8,6 @@ import (
 	"dashquic/utils"
 	"flag"
 	"fmt"
-	h2quic "github.com/quic-go/quic-go/http3"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/http2"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -24,6 +21,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	h2quic "github.com/quic-go/quic-go/http3"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/http2"
 )
 
 // Command Line  Parameters
@@ -80,10 +81,21 @@ func main() {
 	parse_arguments()
 	print_arguments()
 
+	// 判断路径是否存在
+	if _, err := os.Stat(LOCAL_TEMP_DIR); os.IsNotExist(err) {
+		// 路径不存在，创建路径
+		err := os.MkdirAll(LOCAL_TEMP_DIR, 0755)
+		if err != nil {
+			fmt.Println("无法创建路径:", err)
+			return
+		}
+		fmt.Println("路径已成功创建")
+	}
+
 	mpdFilename := utils.ExtractMpdFileName(mpdFullUrl)
 	// logger
 	// 创建日志文件
-	logFilename := fmt.Sprintf("logs_%s.json", mpdFilename)
+	logFilename := fmt.Sprintf("%slogs_%s.txt", LOCAL_TEMP_DIR, mpdFilename)
 	file, err := os.OpenFile(logFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatal(err)
