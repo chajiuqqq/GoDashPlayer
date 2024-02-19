@@ -1,6 +1,6 @@
 module dashquic
 
-go 1.21.0
+go 1.21
 
 //replace (
 //	github.com/lucas-clemente/quic-go/h2quic => github.com/quic-go/quic-go v0.41.0
